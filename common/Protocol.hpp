@@ -4,7 +4,12 @@
 #include <cstdint>
 #include <cstring>
 
-enum MsgType : uint8_t { MSG_JOIN = 1, MSG_INPUT = 2, MSG_SNAPSHOT = 3 };
+enum MsgType : uint8_t {
+  MSG_JOIN = 1,
+  MSG_INPUT = 2,
+  MSG_SNAPSHOT = 3,
+  MSG_WELCOME = 4
+};
 
 constexpr size_t MAX_PLAYERS = 100;
 constexpr size_t MAX_PACKET = 512;
@@ -55,6 +60,11 @@ struct Reader {
   bool done() const { return position == length; }
 };
 
+struct PlayerState {
+  int16_t x, y;
+  uint8_t id;
+};
+
 struct JoinMsg {};
 
 struct InputMsg {
@@ -62,14 +72,14 @@ struct InputMsg {
   int8_t dx, dy;
 };
 
-struct PlayerState {
-  int16_t x, y;
-};
-
 struct SnapshotMsg {
   uint16_t sequence;
   uint8_t count;
   PlayerState players[MAX_PLAYERS];
+};
+
+struct WelcomeMsg {
+  uint8_t id;
 };
 
 inline bool read_type(Reader &reader, uint8_t &type) { return reader.u8(type); }
@@ -98,11 +108,12 @@ inline bool write_snapshot(Writer &writer, const SnapshotMsg &msg) {
       !writer.u8(msg.count))
     return false;
   for (uint8_t i = 0; i < msg.count; ++i) {
-    if (!writer.u16((uint16_t)msg.players[i].x) ||
+    if (!writer.u8(msg.players[i].id) ||
+        !writer.u16((uint16_t)msg.players[i].x) ||
         !writer.u16((uint16_t)msg.players[i].y))
       return false;
-    return true;
   }
+  return true;
 }
 inline bool read_snapshot(Reader &reader, SnapshotMsg &msg) {
   if (!reader.u16(msg.sequence) || !reader.u8(msg.count))
@@ -110,11 +121,20 @@ inline bool read_snapshot(Reader &reader, SnapshotMsg &msg) {
   if (msg.count > MAX_PLAYERS)
     return false;
   for (uint8_t i = 0; i < msg.count; ++i) {
+    uint8_t id;
     uint16_t x, y;
-    if (!reader.u16(x) || !reader.u16(y))
+    if (!reader.u8(id) || !reader.u16(x) || !reader.u16(y))
       return false;
+    msg.players[i].id = id;
     msg.players[i].x = (int16_t)x;
     msg.players[i].y = (int16_t)y;
   }
   return reader.done();
+}
+
+inline bool write_welcome(Writer &writer, const WelcomeMsg &msg) {
+  return writer.u8(MSG_WELCOME) && writer.u8(msg.id);
+}
+inline bool read_welcome(Reader &reader, WelcomeMsg &msg) {
+  return reader.u8(msg.id) && reader.done();
 }
