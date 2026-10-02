@@ -1,6 +1,6 @@
 #include "Protocol.hpp"
+#include "Timing.hpp"
 #include <arpa/inet.h>
-#include <chrono>
 #include <cstdio>
 #include <fcntl.h>
 #include <map>
@@ -8,8 +8,6 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
-
-using Clock = std::chrono::steady_clock;
 
 struct Player {
   sockaddr_in addr;
@@ -42,19 +40,16 @@ int main() {
     return 1;
   }
 
-  constexpr auto TICK = std::chrono::nanoseconds(1000000000 / 60);
   auto next_tick = Clock::now() + TICK;
   std::map<uint64_t, Player> players;
   uint16_t snap_sequence = 0;
   uint8_t next_id = 1;
 
   for (;;) {
-    auto wait = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    next_tick - Clock::now())
-                    .count();
+    auto wait = ms_until(next_tick);
     pollfd pfd{fd, POLLIN, 0};
     if (wait > 0)
-      poll(&pfd, 1, (int)wait);
+      poll(&pfd, 1, wait);
 
     uint8_t buf[MAX_PACKET];
     sockaddr_in from;

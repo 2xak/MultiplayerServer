@@ -5,7 +5,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)   # lets clangd/clang-tidy work
 
-add_library(common STATIC common/socket.cpp common/timing.cpp)
+add_library(common STATIC common/socket.cpp common/Timing.hpp)
 target_include_directories(common PUBLIC common)
 target_compile_options(common PUBLIC -Wall -Wextra -Wpedantic)
 
