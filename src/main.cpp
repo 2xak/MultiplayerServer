@@ -14,6 +14,7 @@ struct Player {
   int16_t x = 0, y = 0;
   int8_t dx = 0, dy = 0;
   uint8_t id = 0;
+  uint32_t bad_packets = 0;
 };
 
 static uint64_t key_of(const sockaddr_in &addr) {
@@ -95,10 +96,20 @@ int main() {
       case MSG_INPUT: {
         InputMsg msg;
         auto it = players.find(key_of(from));
-        if (read_input(r, msg) && it != players.end()) {
-          it->second.dx = msg.dx;
-          it->second.dy = msg.dy;
+        if (!read_input(r, msg) || it == players.end())
+          break;
+
+        Player &player = it->second;
+        if (!is_valid_input(msg)) {
+          ++player.bad_packets;
+          if (player.bad_packets == 1 || player.bad_packets % 100 == 0)
+            printf("player %d sent invalid input (%u so far)\n", player.id,
+                   player.bad_packets);
+          break;
         }
+
+        player.dx = msg.dx;
+        player.dy = msg.dy;
         break;
       }
       default:

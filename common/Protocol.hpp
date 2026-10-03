@@ -13,6 +13,7 @@ enum MsgType : uint8_t {
 
 constexpr size_t MAX_PLAYERS = 100;
 constexpr size_t MAX_PACKET = 512;
+constexpr int8_t MAX_INPUT = 1;
 
 struct Writer {
   uint8_t *buffer;
@@ -93,14 +94,23 @@ inline bool write_input(Writer &writer, const InputMsg &msg) {
   return writer.u8(MSG_INPUT) && writer.u16(msg.sequence) &&
          writer.u8((uint8_t)msg.dx) && writer.u8((uint8_t)msg.dy);
 }
-
 inline bool read_input(Reader &reader, InputMsg &msg) {
-  uint8_t dx, dy;
-  if (!reader.u16(msg.sequence) || !reader.u8(dx) || !reader.u8(dy))
+  uint16_t sequence;
+  uint8_t raw_dx, raw_dy;
+  if (!reader.u16(sequence) || !reader.u8(raw_dx) || !reader.u8(raw_dy))
     return false;
-  msg.dx = (int8_t)dx;
-  msg.dy = (int8_t)dy;
-  return reader.done();
+  if (!reader.done())
+    return false;
+
+  msg.sequence = sequence;
+  msg.dx = (int8_t)raw_dx;
+  msg.dy = (int8_t)raw_dy;
+  return true;
+}
+
+inline bool is_valid_input(const InputMsg &msg) {
+  return msg.dx >= -MAX_INPUT && msg.dx <= MAX_INPUT && msg.dy >= -MAX_INPUT &&
+         msg.dy <= MAX_INPUT;
 }
 
 inline bool write_snapshot(Writer &writer, const SnapshotMsg &msg) {
