@@ -15,6 +15,7 @@ struct Player {
   int8_t dx = 0, dy = 0;
   uint8_t id = 0;
   uint32_t bad_packets = 0;
+  Clock::time_point last_input = Clock::now();
 };
 
 static uint64_t key_of(const sockaddr_in &addr) {
@@ -47,11 +48,13 @@ int main() {
   uint8_t next_id = 1;
 
   for (;;) {
+    // poll for incoming packets or until the next tick
     auto wait = ms_until(next_tick);
     pollfd pfd{fd, POLLIN, 0};
     if (wait > 0)
       poll(&pfd, 1, wait);
 
+    // loop over all incoming packets
     uint8_t buf[MAX_PACKET];
     sockaddr_in from;
     for (;;) {
@@ -75,6 +78,8 @@ int main() {
 
         uint64_t key = key_of(from);
         auto it = players.find(key);
+
+        // find the player or create a new one if not found
         if (it == players.end()) {
           if (players.size() >= MAX_PLAYERS)
             break;
@@ -83,7 +88,12 @@ int main() {
           player.addr = from;
           player.id = next_id++;
           it = players.emplace(key, player).first;
+          printf("player %d joined (%zu online)\n", it->second.id,
+                 players.size());
         }
+
+        // do stuffs to the player found or created above
+        it->second.last_input = Clock::now();
 
         uint8_t out[MAX_PACKET];
         Writer writer{out, sizeof out};
@@ -100,6 +110,8 @@ int main() {
           break;
 
         Player &player = it->second;
+        player.last_input = Clock::now();
+
         if (!is_valid_input(msg)) {
           ++player.bad_packets;
           if (player.bad_packets == 1 || player.bad_packets % 100 == 0)
@@ -115,29 +127,44 @@ int main() {
       default:
         break;
       }
+    }
 
-      if (Clock::now() >= next_tick) {
-        for (auto &[key, player] : players) {
-          player.x += player.dx;
-          player.y += player.dy;
+    // tick
+    if (Clock::now() >= next_tick) {
+      // remove timed out players
+      auto now = Clock::now();
+      for (auto it = players.begin(); it != players.end();) {
+        if (now - it->second.last_input > PLAYER_TIMEOUT) {
+          printf("player %d timed out (%zu online)\n", it->second.id,
+                 players.size() - 1);
+          it = players.erase(it);
+        } else {
+          ++it;
         }
-
-        SnapshotMsg s;
-        s.sequence = ++snap_sequence;
-        s.count = 0;
-        for (auto &[key, player] : players)
-          s.players[s.count++] = {player.x, player.y, player.id};
-
-        uint8_t out[MAX_PACKET];
-        Writer w{out, sizeof out};
-        if (write_snapshot(w, s)) {
-          for (auto &[key, player] : players) {
-            sendto(fd, out, w.position, 0, (sockaddr *)&player.addr,
-                   sizeof player.addr);
-          }
-        }
-        next_tick += TICK;
       }
+
+      // simulate player movement
+      for (auto &[key, player] : players) {
+        player.x += player.dx;
+        player.y += player.dy;
+      }
+
+      // send snapshot to all players
+      SnapshotMsg s;
+      s.sequence = ++snap_sequence;
+      s.count = 0;
+      for (auto &[key, player] : players)
+        s.players[s.count++] = {player.x, player.y, player.id};
+
+      uint8_t out[MAX_PACKET];
+      Writer w{out, sizeof out};
+      if (write_snapshot(w, s)) {
+        for (auto &[key, player] : players) {
+          sendto(fd, out, w.position, 0, (sockaddr *)&player.addr,
+                 sizeof player.addr);
+        }
+      }
+      next_tick += TICK;
     }
   }
 }
