@@ -8,7 +8,9 @@ enum MsgType : uint8_t {
   MSG_JOIN = 1,
   MSG_INPUT = 2,
   MSG_SNAPSHOT = 3,
-  MSG_WELCOME = 4
+  MSG_WELCOME = 4,
+  MSG_PING = 5,
+  MSG_PONG = 6
 };
 
 constexpr size_t MAX_PLAYERS = 100;
@@ -83,12 +85,20 @@ struct WelcomeMsg {
   uint8_t id;
 };
 
+struct PingMsg {
+  uint16_t sequence;
+};
+
+struct PongMsg {
+  uint16_t sequence;
+};
+
 // compare sequence if a is newer than b, handle 16-bit wraparound
 inline bool sequence_newer(uint16_t a, uint16_t b) {
   return ((a > b) && (a - b <= 32768)) || ((a < b) && (b - a > 32768));
 }
 
-// message types read and write
+// message types read and write helpers
 inline bool read_type(Reader &reader, uint8_t &type) { return reader.u8(type); }
 
 inline bool write_join(Writer &writer, const JoinMsg &) {
@@ -153,4 +163,18 @@ inline bool write_welcome(Writer &writer, const WelcomeMsg &msg) {
 }
 inline bool read_welcome(Reader &reader, WelcomeMsg &msg) {
   return reader.u8(msg.id) && reader.done();
+}
+
+inline bool write_ping(Writer &writer, const PingMsg &msg) {
+  return writer.u8(MSG_PING) && writer.u16(msg.sequence);
+}
+inline bool read_ping(Reader &reader, PingMsg &msg) {
+  return reader.u16(msg.sequence) && reader.done();
+}
+
+inline bool write_pong(Writer &writer, const PongMsg &msg) {
+  return writer.u8(MSG_PONG) && writer.u16(msg.sequence);
+}
+inline bool read_pong(Reader &reader, PongMsg &msg) {
+  return reader.u16(msg.sequence) && reader.done();
 }

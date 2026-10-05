@@ -1,4 +1,5 @@
 #include "Protocol.hpp"
+#include "Timing.hpp"
 #include <arpa/inet.h>
 #include <cstdio>
 #include <cstdlib>
@@ -6,6 +7,12 @@
 #include <poll.h>
 #include <sys/socket.h>
 #include <unistd.h>
+
+struct PendingPing {
+  uint16_t sequence = 0;
+  Clock::time_point sent;
+  bool active = false;
+};
 
 int main(int argc, char **argv) {
   srand(time(nullptr) ^ getpid());
@@ -57,14 +64,35 @@ int main(int argc, char **argv) {
   uint16_t sequence = 0;
   uint16_t last_snapshot = 0;
   bool has_snapshot = false;
+  // variables for ping
+  constexpr size_t PING_SLOTS = 64;
+  PendingPing pending[PING_SLOTS];
+  uint16_t ping_sequence = 0;
+  auto next_ping = Clock::now() + PING_INTERVAL;
+  double smoothed_rtt = 0;
+  bool has_rtt = false;
 
   for (;;) {
+    // send input msg
     InputMsg input{++sequence, (int8_t)(rand() % 3 - 1),
                    (int8_t)(rand() % 3 - 1)};
     Writer writer{out, sizeof out};
     if (write_input(writer, input))
       send(fd, out, writer.position, 0);
 
+    // send a ping on interval
+    if (Clock::now() >= next_ping) {
+      uint16_t ping_seq = ++ping_sequence;
+      pending[ping_seq % PING_SLOTS] = {ping_seq, Clock::now(), true};
+
+      Writer p_writer{out, sizeof out};
+      if (write_ping(p_writer, PingMsg{ping_seq}))
+        send(fd, out, p_writer.position, 0);
+
+      next_ping += PING_INTERVAL;
+    }
+
+    // poll and receive - wip change logic base on new pingmsg
     pollfd pfd{fd, POLLIN, 0};
     if (poll(&pfd, 1, 50) > 0) {
       uint8_t buf[MAX_PACKET];

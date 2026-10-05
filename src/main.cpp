@@ -78,10 +78,9 @@ int main() {
         if (!read_join(r, msg))
           break;
 
+        // find the player or create a new one if not found
         uint64_t key = key_of(from);
         auto it = players.find(key);
-
-        // find the player or create a new one if not found
         if (it == players.end()) {
           if (players.size() >= MAX_PLAYERS)
             break;
@@ -132,6 +131,21 @@ int main() {
         player.has_input = true;
         player.dx = msg.dx;
         player.dy = msg.dy;
+        break;
+      }
+      case MSG_PING: {
+        PingMsg msg;
+        auto it = players.find(key_of(from));
+        if (!read_ping(r, msg) || it == players.end())
+          break;
+
+        it->second.last_input = Clock::now();
+
+        uint8_t out[MAX_PACKET];
+        Writer writer{out, sizeof out};
+        PongMsg pong{msg.sequence};
+        if (write_pong(writer, pong))
+          sendto(fd, out, writer.position, 0, (sockaddr *)&from, sizeof from);
         break;
       }
       default:
