@@ -83,6 +83,12 @@ struct WelcomeMsg {
   uint8_t id;
 };
 
+// compare sequence if a is newer than b, handle 16-bit wraparound
+inline bool sequence_newer(uint16_t a, uint16_t b) {
+  return ((a > b) && (a - b <= 32768)) || ((a < b) && (b - a > 32768));
+}
+
+// message types read and write
 inline bool read_type(Reader &reader, uint8_t &type) { return reader.u8(type); }
 
 inline bool write_join(Writer &writer, const JoinMsg &) {

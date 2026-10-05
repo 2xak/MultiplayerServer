@@ -16,6 +16,8 @@ struct Player {
   uint8_t id = 0;
   uint32_t bad_packets = 0;
   Clock::time_point last_input = Clock::now();
+  uint16_t last_sequence = 0;
+  bool has_input = false;
 };
 
 static uint64_t key_of(const sockaddr_in &addr) {
@@ -94,6 +96,7 @@ int main() {
 
         // do stuffs to the player found or created above
         it->second.last_input = Clock::now();
+        it->second.has_input = false;
 
         uint8_t out[MAX_PACKET];
         Writer writer{out, sizeof out};
@@ -120,6 +123,13 @@ int main() {
           break;
         }
 
+        // check sequence for old inputs
+        if (player.has_input &&
+            !sequence_newer(msg.sequence, player.last_sequence))
+          break;
+
+        player.last_sequence = msg.sequence;
+        player.has_input = true;
         player.dx = msg.dx;
         player.dy = msg.dy;
         break;

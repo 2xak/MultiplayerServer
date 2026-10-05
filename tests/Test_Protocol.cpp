@@ -14,12 +14,13 @@ static bool roundtrip(InputMsg in) {
 }
 
 int main() {
-  assert(roundtrip({1, 0, 0}));
-  assert(roundtrip({1, 1, -1}));
-  assert(roundtrip({65535, -1, 1}));
-  assert(!roundtrip({1, 2, 0}));
-  assert(!roundtrip({1, 0, -2}));
-  assert(!roundtrip({1, 100, 0}));
-  assert(!roundtrip({1, 0, -128}));
+  assert(sequence_newer(1, 0));
+  assert(sequence_newer(101, 100));
+  assert(!sequence_newer(100, 101));
+  assert(!sequence_newer(5, 5));    // duplicate
+  assert(sequence_newer(0, 65535)); // wrapped
+  assert(!sequence_newer(65535, 0));
+  assert(sequence_newer(100, 40000)); // far apart: treated as wrapped
+  assert(!sequence_newer(40000, 100));
   puts("all input validation tests passed");
 }

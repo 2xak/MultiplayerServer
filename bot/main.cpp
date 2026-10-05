@@ -53,7 +53,11 @@ int main(int argc, char **argv) {
   }
   printf("my id: %d\n", my_id);
 
+  // variables
   uint16_t sequence = 0;
+  uint16_t last_snapshot = 0;
+  bool has_snapshot = false;
+
   for (;;) {
     InputMsg input{++sequence, (int8_t)(rand() % 3 - 1),
                    (int8_t)(rand() % 3 - 1)};
@@ -74,14 +78,22 @@ int main(int argc, char **argv) {
         SnapshotMsg snap;
         if (read_type(reader, type) && type == MSG_SNAPSHOT &&
             read_snapshot(reader, snap)) {
+
+          // check if sequence is newer
+          if (!has_snapshot || sequence_newer(snap.sequence, last_snapshot)) {
+            has_snapshot = true;
+            last_snapshot = snap.sequence;
+          }
+
+          // find the client id and print its position
           for (uint8_t i = 0; i < snap.count; ++i) {
             if (snap.players[i].id == my_id) {
               printf("snapshot #%u: me at (%d, %d), %u players\n",
                      snap.sequence, snap.players[i].x, snap.players[i].y,
                      snap.count);
+              fflush(stdout);
               break;
             }
-            fflush(stdout);
           }
         }
       }
