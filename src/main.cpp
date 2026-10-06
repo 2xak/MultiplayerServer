@@ -15,7 +15,7 @@ struct Player {
   int8_t dx = 0, dy = 0;
   uint8_t id = 0;
   uint32_t bad_packets = 0;
-  Clock::time_point last_input = Clock::now();
+  Clock::time_point last_heard = Clock::now(); // both from input msg and ping
   uint16_t last_sequence = 0;
   bool has_input = false;
 };
@@ -94,7 +94,7 @@ int main() {
         }
 
         // do stuffs to the player found or created above
-        it->second.last_input = Clock::now();
+        it->second.last_heard = Clock::now();
         it->second.has_input = false;
 
         uint8_t out[MAX_PACKET];
@@ -112,7 +112,7 @@ int main() {
           break;
 
         Player &player = it->second;
-        player.last_input = Clock::now();
+        player.last_heard = Clock::now();
 
         if (!is_valid_input(msg)) {
           ++player.bad_packets;
@@ -139,7 +139,7 @@ int main() {
         if (!read_ping(r, msg) || it == players.end())
           break;
 
-        it->second.last_input = Clock::now();
+        it->second.last_heard = Clock::now();
 
         uint8_t out[MAX_PACKET];
         Writer writer{out, sizeof out};
@@ -158,7 +158,7 @@ int main() {
       // remove timed out players
       auto now = Clock::now();
       for (auto it = players.begin(); it != players.end();) {
-        if (now - it->second.last_input > PLAYER_TIMEOUT) {
+        if (now - it->second.last_heard > PLAYER_TIMEOUT) {
           printf("player %d timed out (%zu online)\n", it->second.id,
                  players.size() - 1);
           it = players.erase(it);
@@ -167,7 +167,7 @@ int main() {
         }
       }
 
-      // simulate player movement
+      // update simulated player movement
       for (auto &[key, player] : players) {
         player.x += player.dx;
         player.y += player.dy;

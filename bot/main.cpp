@@ -11,7 +11,7 @@
 struct PendingPing {
   uint16_t sequence = 0;
   Clock::time_point sent;
-  bool active = false;
+  bool active = false; // true = waiting for pong
 };
 
 int main(int argc, char **argv) {
@@ -29,6 +29,18 @@ int main(int argc, char **argv) {
   srv.sin_family = AF_INET;
   srv.sin_port = htons(12345);
   inet_pton(AF_INET, ip, &srv.sin_addr);
+
+  if (argc > 2) { // reconnect test
+    sockaddr_in local{};
+    local.sin_family = AF_INET;
+    local.sin_addr.s_addr = htonl(INADDR_ANY);
+    local.sin_port = htons((uint16_t)atoi(argv[2]));
+    if (bind(fd, (sockaddr *)&local, sizeof local) < 0) {
+      perror("bind");
+      return 1;
+    }
+  }
+
   connect(fd, (sockaddr *)&srv, sizeof srv);
 
   uint8_t out[MAX_PACKET];
@@ -92,33 +104,67 @@ int main(int argc, char **argv) {
       next_ping += PING_INTERVAL;
     }
 
-    // poll and receive - wip change logic base on new pingmsg
+    // poll and receive based on msg type
     pollfd pfd{fd, POLLIN, 0};
     if (poll(&pfd, 1, 50) > 0) {
-      uint8_t buf[MAX_PACKET];
-      ssize_t n, last = -1;
-      while ((n = recv(fd, buf, sizeof buf, MSG_DONTWAIT)) > 0)
-        last = n;
+      SnapshotMsg latest;
+      bool got_snapshot = false;
 
-      if (last > 0) {
-        Reader reader{buf, (size_t)last};
+      ssize_t n;
+      while ((n = recv(fd, buf, sizeof buf, MSG_DONTWAIT)) > 0) {
+        Reader reader{buf, (size_t)n};
         uint8_t type;
-        SnapshotMsg snap;
-        if (read_type(reader, type) && type == MSG_SNAPSHOT &&
-            read_snapshot(reader, snap)) {
+        if (!read_type(reader, type))
+          continue;
 
-          // check if sequence is newer
-          if (!has_snapshot || sequence_newer(snap.sequence, last_snapshot)) {
-            has_snapshot = true;
-            last_snapshot = snap.sequence;
+        switch (type) {
+        case MSG_SNAPSHOT: {
+          SnapshotMsg snap;
+          if (read_snapshot(reader, snap) &&
+              (!got_snapshot ||
+               sequence_newer(snap.sequence, latest.sequence))) {
+            latest = snap;
+            got_snapshot = true;
           }
+          break;
+        }
+        case MSG_PONG: {
+          PongMsg pong;
+          if (!read_pong(reader, pong))
+            break;
 
-          // find the client id and print its position
-          for (uint8_t i = 0; i < snap.count; ++i) {
-            if (snap.players[i].id == my_id) {
+          PendingPing &slot = pending[pong.sequence % PING_SLOTS];
+          if (slot.active && slot.sequence == pong.sequence) {
+            double rtt = std::chrono::duration<double, std::milli>(
+                             Clock::now() - slot.sent)
+                             .count();
+
+            slot.active = false;
+            // SRTT formula
+            smoothed_rtt = has_rtt ? 0.875 * smoothed_rtt + 0.125 * rtt : rtt;
+            has_rtt = true;
+            printf("rtt %.2f ms (avg %.2f ms)\n", rtt, smoothed_rtt);
+            fflush(stdout);
+          }
+          break;
+        }
+        default:
+          break;
+        }
+
+        // use the newest and latest snapshot
+        if (got_snapshot &&
+            (!has_snapshot || sequence_newer(latest.sequence, last_snapshot))) {
+          has_snapshot = true;
+          ;
+          last_snapshot = latest.sequence;
+
+          for (uint8_t i = 0; i < latest.count; ++i) {
+            if (latest.players[i].id == my_id) {
               printf("snapshot #%u: me at (%d, %d), %u players\n",
-                     snap.sequence, snap.players[i].x, snap.players[i].y,
-                     snap.count);
+                     latest.sequence, latest.players[i].x, latest.players[i].y,
+                     latest.count);
+
               fflush(stdout);
               break;
             }
