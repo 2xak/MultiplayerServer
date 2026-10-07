@@ -1,5 +1,7 @@
+#include "Game.hpp"
 #include "Protocol.hpp"
 #include "Timing.hpp"
+
 #include <arpa/inet.h>
 #include <cstdio>
 #include <fcntl.h>
@@ -88,6 +90,8 @@ int main() {
           Player player;
           player.addr = from;
           player.id = next_id++;
+          player.x = SPAWN.x;
+          player.y = SPAWN.y;
           it = players.emplace(key, player).first;
           printf("player %d joined (%zu online)\n", it->second.id,
                  players.size());
@@ -168,8 +172,10 @@ int main() {
 
       // update simulated player movement
       for (auto &[key, player] : players) {
-        player.x += player.dx;
-        player.y += player.dy;
+        Position pos =
+            simulate_step({player.x, player.y}, player.dx, player.dy);
+        player.x = pos.x;
+        player.y = pos.y;
       }
 
       // send snapshot to all players
