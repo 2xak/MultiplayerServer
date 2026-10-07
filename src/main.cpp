@@ -93,7 +93,6 @@ int main() {
                  players.size());
         }
 
-        // do stuffs to the player found or created above
         it->second.last_heard = Clock::now();
         it->second.has_input = false;
 

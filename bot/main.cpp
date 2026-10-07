@@ -14,6 +14,37 @@ struct PendingPing {
   bool active = false; // true = waiting for pong
 };
 
+static int join_server(int fd) {
+  uint8_t out[MAX_PACKET];
+  uint8_t buf[MAX_PACKET];
+
+  for (;;) {
+    Writer writer{out, sizeof out};
+    write_join(writer, JoinMsg{});
+    send(fd, out, writer.position, 0);
+
+    auto deadline = Clock::now() + RETRY_INTERVAL;
+    for (int wait = ms_until(deadline); wait > 0; wait = ms_until(deadline)) {
+      pollfd pfd{fd, POLLIN, 0};
+      if (poll(&pfd, 1, wait) <= 0)
+        break;
+
+      ssize_t n = recv(fd, buf, sizeof buf, 0);
+      if (n < 0)
+        continue;
+
+      Reader reader{buf, (size_t)n};
+      uint8_t type;
+      if (!read_type(reader, type) || type != MSG_WELCOME)
+        continue;
+
+      WelcomeMsg welcome;
+      if (read_welcome(reader, welcome))
+        return welcome.id;
+    }
+  }
+}
+
 int main(int argc, char **argv) {
   srand(time(nullptr) ^ getpid());
 
@@ -23,12 +54,6 @@ int main(int argc, char **argv) {
     perror("socket");
     return 1;
   }
-
-  // init adress
-  sockaddr_in srv{};
-  srv.sin_family = AF_INET;
-  srv.sin_port = htons(12345);
-  inet_pton(AF_INET, ip, &srv.sin_addr);
 
   if (argc > 2) { // reconnect test
     sockaddr_in local{};
@@ -41,36 +66,19 @@ int main(int argc, char **argv) {
     }
   }
 
+  // init adress
+  sockaddr_in srv{};
+  srv.sin_family = AF_INET;
+  srv.sin_port = htons(12345);
+  inet_pton(AF_INET, ip, &srv.sin_addr);
   connect(fd, (sockaddr *)&srv, sizeof srv);
 
   uint8_t out[MAX_PACKET];
   uint8_t buf[MAX_PACKET];
 
-  int my_id = -1;
-  while (my_id < 0) {
-    Writer writer{out, sizeof out};
-    write_join(writer, JoinMsg{});
-    send(fd, out, writer.position, 0);
-
-    pollfd pfd{fd, POLLIN, 0};
-    if (poll(&pfd, 1, 500) > 0) {
-      ssize_t n = recv(fd, buf, sizeof buf, 0);
-      if (n < 0)
-        continue;
-
-      Reader reader{buf, (size_t)n};
-      uint8_t type;
-      if (!read_type(reader, type) || type != MSG_WELCOME)
-        continue;
-
-      WelcomeMsg welcome;
-      if (!read_welcome(reader, welcome))
-        continue;
-
-      my_id = welcome.id;
-    }
-  }
+  int my_id = join_server(fd);
   printf("my id: %d\n", my_id);
+  fflush(stdout);
 
   // variables
   uint16_t sequence = 0;
@@ -80,17 +88,23 @@ int main(int argc, char **argv) {
   constexpr size_t PING_SLOTS = 64;
   PendingPing pending[PING_SLOTS];
   uint16_t ping_sequence = 0;
-  auto next_ping = Clock::now() + PING_INTERVAL;
   double smoothed_rtt = 0;
   bool has_rtt = false;
+  // schedules var for server silence dectection
+  auto next_input = Clock::now();
+  auto next_ping = Clock::now() + PING_INTERVAL;
+  auto last_packet = Clock::now();
 
   for (;;) {
     // send input msg
-    InputMsg input{++sequence, (int8_t)(rand() % 3 - 1),
-                   (int8_t)(rand() % 3 - 1)};
-    Writer writer{out, sizeof out};
-    if (write_input(writer, input))
-      send(fd, out, writer.position, 0);
+    if (Clock::now() >= next_input) {
+      InputMsg input{++sequence, (int8_t)(rand() % 3 - 1),
+                     (int8_t)(rand() % 3 - 1)};
+      Writer writer{out, sizeof out};
+      if (write_input(writer, input))
+        send(fd, out, writer.position, 0);
+      next_input += TICK;
+    }
 
     // send a ping on interval
     if (Clock::now() >= next_ping) {
@@ -105,8 +119,9 @@ int main(int argc, char **argv) {
     }
 
     // poll and receive based on msg type
+    auto next_event = next_input < next_ping ? next_input : next_ping;
     pollfd pfd{fd, POLLIN, 0};
-    if (poll(&pfd, 1, 50) > 0) {
+    if (poll(&pfd, 1, ms_until(next_event)) > 0) {
       SnapshotMsg latest;
       bool got_snapshot = false;
 
@@ -116,6 +131,8 @@ int main(int argc, char **argv) {
         uint8_t type;
         if (!read_type(reader, type))
           continue;
+
+        last_packet = Clock::now();
 
         switch (type) {
         case MSG_SNAPSHOT: {
@@ -171,6 +188,25 @@ int main(int argc, char **argv) {
           }
         }
       }
+    }
+
+    // server silence handle
+    if (Clock::now() - last_packet > SERVER_SILENCE_TIMEOUT) {
+      printf("server silent, rejoining...\n");
+
+      my_id = join_server(fd);
+      printf("rejoined, my id: %d\n", my_id);
+
+      sequence = 0;
+      has_snapshot = false;
+      for (auto &slot : pending)
+        slot.active = false;
+      has_rtt = false;
+      smoothed_rtt = 0;
+
+      next_input = Clock::now();
+      next_ping = Clock::now() + PING_INTERVAL;
+      last_packet = Clock::now();
     }
   }
 }
