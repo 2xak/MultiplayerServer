@@ -9,6 +9,8 @@ WIP - to be updated
 - Ping/rtt
 - Server silence handle on client side
 
-## Part B: game <- we're here
-- Game rules
+## Part B: game
+- Game rules and movement logic
+- Client-side prediction and reconcilliation
+- Interpolation? <- we're here
 - ...
