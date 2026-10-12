@@ -4,6 +4,7 @@
 
 #include <arpa/inet.h>
 #include <cstdio>
+#include <deque>
 #include <fcntl.h>
 #include <map>
 #include <netinet/in.h>
@@ -14,12 +15,13 @@
 struct Player {
   sockaddr_in addr;
   int16_t x = 0, y = 0;
-  int8_t dx = 0, dy = 0;
   uint8_t id = 0;
   uint32_t bad_packets = 0;
   Clock::time_point last_heard = Clock::now(); // both from input msg and ping
   uint16_t last_sequence = 0;
   bool has_input = false;
+  std::deque<InputMsg> input_queue;
+  uint16_t last_processed_sequence = 0;
 };
 
 static uint64_t key_of(const sockaddr_in &addr) {
@@ -99,6 +101,8 @@ int main() {
 
         it->second.last_heard = Clock::now();
         it->second.has_input = false;
+        it->second.input_queue.clear();
+        it->second.last_processed_sequence = 0;
 
         uint8_t out[MAX_PACKET];
         Writer writer{out, sizeof out};
@@ -132,8 +136,8 @@ int main() {
 
         player.last_sequence = msg.sequence;
         player.has_input = true;
-        player.dx = msg.dx;
-        player.dy = msg.dy;
+        if (player.input_queue.size() < MAX_QUEUED_INPUTS)
+          player.input_queue.push_back(msg);
         break;
       }
       case MSG_PING: {
@@ -172,10 +176,15 @@ int main() {
 
       // update simulated player movement
       for (auto &[key, player] : players) {
-        Position pos =
-            simulate_step({player.x, player.y}, player.dx, player.dy);
+        if (player.input_queue.empty())
+          continue;
+        InputMsg input = player.input_queue.front();
+        player.input_queue.pop_front();
+
+        Position pos = simulate_step({player.x, player.y}, input.dx, input.dy);
         player.x = pos.x;
         player.y = pos.y;
+        player.last_processed_sequence = input.sequence;
       }
 
       // send snapshot to all players
@@ -185,13 +194,13 @@ int main() {
       for (auto &[key, player] : players)
         s.players[s.count++] = {player.x, player.y, player.id};
 
-      uint8_t out[MAX_PACKET];
-      Writer w{out, sizeof out};
-      if (write_snapshot(w, s)) {
-        for (auto &[key, player] : players) {
+      for (auto &[key, player] : players) {
+        s.last_processed_input = player.last_processed_sequence;
+        uint8_t out[MAX_PACKET];
+        Writer w{out, sizeof out};
+        if (write_snapshot(w, s))
           sendto(fd, out, w.position, 0, (sockaddr *)&player.addr,
                  sizeof player.addr);
-        }
       }
       next_tick += TICK;
     }

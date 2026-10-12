@@ -1,9 +1,11 @@
 #pragma once
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 
 #include "Timing.hpp"
 
+constexpr size_t MAX_QUEUED_INPUTS = 10;
 constexpr int WORLD_W = 4000;
 constexpr int WORLD_H = 4000;
 static_assert(WORLD_W < 32767 && WORLD_H < 32767,

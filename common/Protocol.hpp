@@ -17,6 +17,11 @@ constexpr size_t MAX_PLAYERS = 100;
 constexpr size_t MAX_PACKET = 512;
 constexpr int8_t MAX_INPUT = 1;
 
+constexpr size_t SNAPSHOT_BYTES = 6;
+constexpr size_t PLAYER_STATE_BYTES = 5;
+static_assert(SNAPSHOT_BYTES + PLAYER_STATE_BYTES * MAX_PLAYERS <= MAX_PACKET,
+              "snapshot must fit in one packet size");
+
 struct Writer {
   uint8_t *buffer;
   size_t capacity;
@@ -77,6 +82,7 @@ struct InputMsg {
 
 struct SnapshotMsg {
   uint16_t sequence;
+  uint16_t last_processed_input;
   uint8_t count;
   PlayerState players[MAX_PLAYERS];
 };
@@ -131,7 +137,7 @@ inline bool is_valid_input(const InputMsg &msg) {
 
 inline bool write_snapshot(Writer &writer, const SnapshotMsg &msg) {
   if (!writer.u8(MSG_SNAPSHOT) || !writer.u16(msg.sequence) ||
-      !writer.u8(msg.count))
+      !writer.u16(msg.last_processed_input) || !writer.u8(msg.count))
     return false;
   for (uint8_t i = 0; i < msg.count; ++i) {
     if (!writer.u8(msg.players[i].id) ||
@@ -142,7 +148,8 @@ inline bool write_snapshot(Writer &writer, const SnapshotMsg &msg) {
   return true;
 }
 inline bool read_snapshot(Reader &reader, SnapshotMsg &msg) {
-  if (!reader.u16(msg.sequence) || !reader.u8(msg.count))
+  if (!reader.u16(msg.sequence) || !reader.u16(msg.last_processed_input) ||
+      !reader.u8(msg.count))
     return false;
   if (msg.count > MAX_PLAYERS)
     return false;
